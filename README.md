@@ -38,7 +38,7 @@ python -m http.server 8000
 - `X / ↑`：顺时针旋转
 - `Z`：逆时针旋转
 - `C`：Hold
-- `P`：暂停
+- `P`：暂停/继续
 - `R`：重开
 - `Esc`：打开/关闭设置
 
@@ -60,6 +60,33 @@ python -m http.server 8000
 3. **Survival**：定时注入垃圾行，节奏更快。
 4. **Challenge**：每 30 秒刷新目标连击，失败追加惩罚。
 5. **Zen**：慢速无压模式。
+
+## 计分与最高分
+
+- 游戏内实时显示 `score`（当前分数）和 `highScore`（当前模式最高分）。
+- 基础消行分（可在代码中调节）：
+  - 1 行：100 × level
+  - 2 行：300 × level
+  - 3 行：500 × level
+  - 4 行：800 × level
+- 软降与硬降有额外分（软降每格 +1，硬降每格 +2）。
+- 若启用现代规则，仍保留 Combo、B2B、T-Spin（简化）与 Perfect Clear 奖励。
+- 最高分采用 localStorage 按模式持久化：
+  - `tetris_highScore_classic`
+  - `tetris_highScore_sprint`
+  - `tetris_highScore_survival`
+  - `tetris_highScore_challenge`
+  - `tetris_highScore_zen`
+- 设置面板提供“清空当前模式最高分”按钮。
+
+## 深浅色主题切换
+
+- 顶栏提供“浅色模式 / 深色模式”一键切换按钮。
+- 主题使用 CSS 变量（`:root[data-theme="dark|light|neon"]`）实现。
+- 主题优先级：
+  1. localStorage `tetris_theme`
+  2. 系统 `prefers-color-scheme`
+- 切换后会立即更新并写入 localStorage。
 
 ## 参数面板（可保存到 localStorage）
 
@@ -89,12 +116,12 @@ python -m http.server 8000
 - Debug 面板开关
 - 导入导出 JSON（设置+记录）
 
-## 计分与判定
+## 暂停与消行动画
 
-- 支持经典与现代两套计分。
-- 支持 Combo、Back-to-Back。
-- T-Spin 使用简化判定：T 方块旋转后锁定，四角占用 >= 3。
-- 支持 Perfect Clear 额外奖励。
+- 暂停为稳定 toggle：`P` 或按钮可反复暂停/继续。
+- 暂停期间逻辑冻结（下落、输入停止），但可打开设置和重开。
+- 恢复时重置时间戳，避免“瞬间下落跳帧”。
+- 消行采用短动画（约 180ms）：先标记满行并播放亮度+淡出，再统一删除并结算，期间停止输入与下落以防状态错乱。
 
 ## 存档与排行榜（本地）
 

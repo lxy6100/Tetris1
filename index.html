@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -10,6 +10,7 @@
   <header class="topbar">
     <h1>俄罗斯方块 · Tetris Vanilla</h1>
     <div class="topbar-actions">
+      <button id="themeToggleBtn">浅色模式</button>
       <button id="startBtn">开始/重开 (R)</button>
       <button id="pauseBtn">暂停 (P)</button>
       <button id="settingsBtn">设置 (Esc)</button>
@@ -35,7 +36,8 @@
       <div class="card stats">
         <h3>状态</h3>
         <p>模式：<span id="modeName">Classic</span></p>
-        <p>分数：<span id="score">0</span></p>
+        <p>当前分数：<span id="score">0</span></p>
+        <p>最高分：<span id="highScore">0</span></p>
         <p>等级：<span id="level">1</span></p>
         <p>消行：<span id="lines">0</span></p>
         <p>连击：<span id="combo">0</span></p>
@@ -60,7 +62,7 @@
           <li>Space：硬降</li>
           <li>Z/X/↑：旋转</li>
           <li>C：Hold</li>
-          <li>P：暂停</li>
+          <li>P：暂停/继续</li>
           <li>R：重开</li>
           <li>Esc：设置</li>
         </ul>
@@ -134,9 +136,10 @@
       </details>
 
       <details>
-        <summary>导入/导出</summary>
+        <summary>导入/导出与记录</summary>
         <button type="button" id="exportBtn">导出 JSON</button>
         <button type="button" id="importBtn">导入 JSON</button>
+        <button type="button" id="clearHighScoreBtn">清空当前模式最高分</button>
         <textarea id="ioText" rows="6" placeholder="粘贴导入/导出 JSON"></textarea>
       </details>
 

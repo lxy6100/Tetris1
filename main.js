@@ -3,6 +3,7 @@
 
   const STORAGE_KEY = 'tetris_vanilla_save_v1';
   const SCORE_KEY = 'tetris_vanilla_scores_v1';
+  const THEME_KEY = 'tetris_theme';
 
   const DEFAULTS = {
     boardWidth: 10, boardHeight: 20, hiddenRows: 2,
@@ -31,11 +32,11 @@
   };
 
   const MODES = {
-    classic: { name:'Classic', goal:null },
-    sprint: { name:'Sprint 40', goal:40 },
-    survival: { name:'Survival', goal:null },
-    challenge: { name:'Challenge', goal:null },
-    zen: { name:'Zen', goal:null },
+    classic: { name:'Classic' },
+    sprint: { name:'Sprint 40' },
+    survival: { name:'Survival' },
+    challenge: { name:'Challenge' },
+    zen: { name:'Zen' },
   };
 
   const DIFF_PRESET = {
@@ -50,9 +51,10 @@
   const nextCanvas = $('nextCanvas'), nctx = nextCanvas.getContext('2d');
 
   const ui = {
-    score: $('score'), level: $('level'), lines: $('lines'), combo: $('combo'), b2b: $('b2b'), timer: $('timer'),
+    score: $('score'), highScore: $('highScore'), level: $('level'), lines: $('lines'), combo: $('combo'), b2b: $('b2b'), timer: $('timer'),
     modeName: $('modeName'), modeBanner: $('modeBanner'), overlay: $('overlay'), debugPanel: $('debugPanel'),
-    modeSelect: $('modeSelect'), settingsModal: $('settingsModal'), settingsForm: $('settingsForm'), ioText: $('ioText')
+    modeSelect: $('modeSelect'), settingsModal: $('settingsModal'), settingsForm: $('settingsForm'), ioText: $('ioText'),
+    themeToggleBtn: $('themeToggleBtn')
   };
 
   function loadSettings() {
@@ -73,7 +75,24 @@
   function loadScores() { try { return JSON.parse(localStorage.getItem(SCORE_KEY)) || {}; } catch { return {}; } }
   function saveScores(scores) { localStorage.setItem(SCORE_KEY, JSON.stringify(scores)); }
 
+  function highScoreKey(mode) { return `tetris_highScore_${mode}`; }
+  function loadHighScore(mode) {
+    const v = Number(localStorage.getItem(highScoreKey(mode)) || 0);
+    return Number.isFinite(v) ? Math.max(0, v) : 0;
+  }
+  function setHighScore(mode, value) {
+    localStorage.setItem(highScoreKey(mode), String(Math.max(0, value|0)));
+  }
+
+  function getThemePreference() {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored) return stored;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+
   let settings = loadSettings();
+  let themeName = getThemePreference();
+  if (settings.theme !== 'neon') settings.theme = themeName;
   let state = null;
   let keyState = { left:false, right:false, down:false };
   let keyTimers = { left:0, right:0, down:0 };
@@ -82,18 +101,20 @@
 
   function freshState(mode='classic') {
     const w = settings.boardWidth, h = settings.boardHeight, hr = settings.hiddenRows;
-    boardCanvas.width = w * 30; boardCanvas.height = h * 30;
+    boardCanvas.width = w * 30;
+    boardCanvas.height = h * 30;
     return {
       board: Array.from({length: h+hr}, () => Array(w).fill('')),
       mode, bag: [], next: [], hold: null, canHold: true,
       piece: null, x: 4, y: 1, r: 0,
-      score:0, level:1, lines:0, combo:-1, b2b:0,
+      score:0, highScore:loadHighScore(mode), level:1, lines:0, combo:-1, b2b:0,
       dropAcc:0, lockAcc:0, lockResets:0, lastRotate:false,
       over:false, paused:false, startedAt:performance.now(), elapsedMs:0,
       challengeGoal: { needed:2, remainingMs:30000, failCount:0 },
       stats: { tetris:0, tspin:0, maxCombo:0, pieces:0, apm:0 },
       hardDropArmed: !settings.safeHardDrop,
       garbageAcc:0,
+      clearAnim: null,
       debug: { fps:0 }
     };
   }
@@ -108,17 +129,30 @@
     state.bag.push(...arr);
   }
 
-  function ensureNext() { while (state.next.length < 6) { refillBag(); state.next.push(state.bag.shift()); } }
+  function ensureNext() {
+    while (state.next.length < 6) {
+      refillBag();
+      state.next.push(state.bag.shift());
+    }
+  }
 
   function spawn() {
     ensureNext();
-    state.piece = state.next.shift(); ensureNext();
-    state.r = 0; state.x = (settings.boardWidth / 2) | 0; state.y = 1;
-    state.canHold = true; state.lockAcc = 0; state.lockResets = 0; state.lastRotate = false; state.stats.pieces++;
-    if (collision(state.x, state.y, state.r)) return gameOver();
+    state.piece = state.next.shift();
+    ensureNext();
+    state.r = 0;
+    state.x = (settings.boardWidth / 2) | 0;
+    state.y = 1;
+    state.canHold = true;
+    state.lockAcc = 0;
+    state.lockResets = 0;
+    state.lastRotate = false;
+    state.stats.pieces++;
+    if (collision(state.x, state.y, state.r)) gameOver();
   }
 
   function getCells(type=state.piece, r=state.r) { return PIECES[type].cells[((r%4)+4)%4]; }
+
   function collision(x, y, r, type=state.piece) {
     const B = state.board;
     return getCells(type, r).some(([dx,dy]) => {
@@ -131,7 +165,8 @@
 
   function move(dx, dy) {
     if (!collision(state.x + dx, state.y + dy, state.r)) {
-      state.x += dx; state.y += dy;
+      state.x += dx;
+      state.y += dy;
       if (dy !== 0) state.lastRotate = false;
       return true;
     }
@@ -142,8 +177,14 @@
     const nr = state.r + dir;
     for (const [kx, ky] of KICKS[settings.kickMode]) {
       if (!collision(state.x + kx, state.y + ky, nr)) {
-        state.r = nr; state.x += kx; state.y += ky; state.lastRotate = true;
-        if (state.lockAcc > 0 && state.lockResets < settings.maxLockResets) { state.lockAcc = 0; state.lockResets++; }
+        state.r = nr;
+        state.x += kx;
+        state.y += ky;
+        state.lastRotate = true;
+        if (state.lockAcc > 0 && state.lockResets < settings.maxLockResets) {
+          state.lockAcc = 0;
+          state.lockResets++;
+        }
         sfx('rotate', 400);
         return true;
       }
@@ -155,25 +196,40 @@
     let dist = 0;
     while (move(0,1)) dist++;
     state.score += dist * 2;
+    syncHighScore();
     lockPiece();
     sfx('hard', 120);
   }
 
   function ghostY() {
     let gy = state.y;
-    while (!collision(state.x, gy+1, state.r)) gy++;
+    while (!collision(state.x, gy + 1, state.r)) gy++;
     return gy;
   }
 
   function hold() {
-    if (!settings.enableHold || !state.canHold) return;
-    if (!state.hold) { state.hold = state.piece; spawn(); }
-    else {
-      const t = state.hold; state.hold = state.piece; state.piece = t;
-      state.x = (settings.boardWidth / 2) | 0; state.y = 1; state.r = 0;
+    if (!settings.enableHold || !state.canHold || state.clearAnim) return;
+    if (!state.hold) {
+      state.hold = state.piece;
+      spawn();
+    } else {
+      const t = state.hold;
+      state.hold = state.piece;
+      state.piece = t;
+      state.x = (settings.boardWidth / 2) | 0;
+      state.y = 1;
+      state.r = 0;
       if (collision(state.x, state.y, state.r)) gameOver();
     }
     state.canHold = false;
+  }
+
+  function findFullRows() {
+    const rows = [];
+    for (let y = state.board.length - 1; y >= 0; y--) {
+      if (state.board[y].every(Boolean)) rows.push(y);
+    }
+    return rows;
   }
 
   function lockPiece() {
@@ -182,10 +238,42 @@
       const cx = state.x + dx, cy = state.y + dy;
       if (cy >= 0) state.board[cy][cx] = type;
     });
+
     const tSpin = detectTSpin(type);
-    const cleared = clearLines();
-    award(cleared, tSpin);
-    if (settings.vfx && navigator.vibrate) navigator.vibrate(cleared ? 30 : 10);
+    const rows = findFullRows();
+
+    if (rows.length) {
+      state.clearAnim = {
+        rows,
+        startedAt: performance.now(),
+        duration: 180,
+        tSpin,
+      };
+      if (settings.vfx && navigator.vibrate) navigator.vibrate(30);
+    } else {
+      state.combo = -1;
+      spawn();
+    }
+  }
+
+  function finalizeLineClear() {
+    const anim = state.clearAnim;
+    if (!anim) return;
+    const rows = anim.rows.slice().sort((a,b)=>b-a);
+    rows.forEach((row) => {
+      state.board.splice(row, 1);
+      state.board.unshift(Array(settings.boardWidth).fill(''));
+    });
+
+    const cleared = rows.length;
+    state.lines += cleared;
+    state.combo++;
+    state.stats.maxCombo = Math.max(state.stats.maxCombo, state.combo);
+    if (cleared === 4) state.stats.tetris++;
+
+    award(cleared, anim.tSpin);
+    sfx('clear', 700);
+    state.clearAnim = null;
     spawn();
   }
 
@@ -200,34 +288,33 @@
     return occ >= 3;
   }
 
-  function clearLines() {
-    let c = 0;
-    for (let y = state.board.length - 1; y >= 0; y--) {
-      if (state.board[y].every(Boolean)) {
-        state.board.splice(y,1); state.board.unshift(Array(settings.boardWidth).fill(''));
-        c++; y++;
-      }
-    }
-    if (c) {
-      state.lines += c; state.combo++; state.stats.maxCombo = Math.max(state.stats.maxCombo, state.combo);
-      if (c===4) state.stats.tetris++;
-      sfx('clear', 700);
-    } else state.combo = -1;
-    return c;
-  }
-
   function award(lines, tSpin) {
     const L = state.level;
-    const baseClassic = [0,40,100,300,1200];
+    const baseClassic = [0,100,300,500,800];
     const baseModern = tSpin ? [0,800,1200,1600,0] : [0,100,300,500,800];
     let add = (settings.scoringSystem === 'classic' ? baseClassic[lines] : baseModern[lines]) * L;
     if (state.combo > 0) add += state.combo * 50 * L;
-    if ((lines===4 || tSpin) && state.b2b>0) add = Math.floor(add * 1.5);
-    if (lines===4 || tSpin) state.b2b++; else if (lines) state.b2b = 0;
+    if ((lines === 4 || tSpin) && state.b2b > 0) add = Math.floor(add * 1.5);
+    if (lines === 4 || tSpin) state.b2b++; else if (lines) state.b2b = 0;
     if (tSpin) state.stats.tspin++;
     if (lines && perfectClear()) add += 2000 * L;
     state.score += add;
+    syncHighScore();
     updateLevel();
+  }
+
+  function syncHighScore() {
+    if (state.score > state.highScore) {
+      state.highScore = state.score;
+      setHighScore(state.mode, state.highScore);
+    }
+  }
+
+  function clearCurrentModeHighScore() {
+    if (!state) return;
+    setHighScore(state.mode, 0);
+    state.highScore = 0;
+    ui.highScore.textContent = '0';
   }
 
   function perfectClear() {
@@ -235,7 +322,10 @@
   }
 
   function updateLevel() {
-    if (state.mode === 'zen') return state.level = 1;
+    if (state.mode === 'zen') {
+      state.level = 1;
+      return;
+    }
     if (settings.levelRule === 'lines') state.level = 1 + Math.floor(state.lines / 10);
     else if (settings.levelRule === 'time') state.level = 1 + Math.floor(state.elapsedMs / 60000);
     else state.level = 1 + Math.floor(state.score / 5000);
@@ -250,7 +340,8 @@
   function addGarbageRow() {
     const hole = (Math.random() * settings.boardWidth) | 0;
     state.board.shift();
-    const row = Array(settings.boardWidth).fill('G'); row[hole] = '';
+    const row = Array(settings.boardWidth).fill('G');
+    row[hole] = '';
     state.board.push(row);
   }
 
@@ -259,15 +350,19 @@
       finish('Sprint 完成！');
     } else if (state.mode === 'survival') {
       state.garbageAcc += dt;
-      if (state.garbageAcc > 12000) { state.garbageAcc = 0; addGarbageRow(); }
+      if (state.garbageAcc > 12000) {
+        state.garbageAcc = 0;
+        addGarbageRow();
+      }
     } else if (state.mode === 'challenge') {
       state.challengeGoal.remainingMs -= dt;
       if (state.challengeGoal.remainingMs <= 0) {
         if (state.combo + 1 < state.challengeGoal.needed) {
-          addGarbageRow(); state.challengeGoal.failCount++;
+          addGarbageRow();
+          state.challengeGoal.failCount++;
         }
         state.challengeGoal.remainingMs = 30000;
-        state.challengeGoal.needed = 1 + ((Math.random()*4)|0);
+        state.challengeGoal.needed = 1 + ((Math.random() * 4) | 0);
       }
       ui.modeBanner.textContent = `挑战：30秒内达成连击 ${state.challengeGoal.needed}`;
     }
@@ -282,7 +377,7 @@
 
   function gameOver() {
     sfx('lose', 140);
-    finish('Game Over');
+    finish('GAME OVER');
   }
 
   function saveRecord() {
@@ -293,7 +388,13 @@
     if (mode === 'sprint') {
       if (!rec.bestTime || state.elapsedMs < rec.bestTime) rec.bestTime = state.elapsedMs;
     }
-    rec.lastStats = { lines: state.lines, tetris: state.stats.tetris, tspin: state.stats.tspin, maxCombo: state.stats.maxCombo, elapsedMs: state.elapsedMs };
+    rec.lastStats = {
+      lines: state.lines,
+      tetris: state.stats.tetris,
+      tspin: state.stats.tspin,
+      maxCombo: state.stats.maxCombo,
+      elapsedMs: state.elapsedMs
+    };
     scores[mode] = rec;
     saveScores(scores);
   }
@@ -301,77 +402,111 @@
   function bestSuggestion() {
     let best = null;
     const piece = state.piece;
-    for (let r=0; r<4; r++) {
-      for (let x=-2; x<settings.boardWidth+2; x++) {
+    for (let r = 0; r < 4; r++) {
+      for (let x = -2; x < settings.boardWidth + 2; x++) {
         let y = -1;
-        while (!collision(x, y+1, r, piece)) y++;
+        while (!collision(x, y + 1, r, piece)) y++;
         if (collision(x, y, r, piece)) continue;
-        const score = heuristic(x,y,r,piece);
+        const score = heuristic(x, y, r, piece);
         if (!best || score > best.score) best = { x, y, r, score };
       }
     }
     return best;
   }
 
-  function heuristic(x,y,r,piece) {
+  function heuristic(x, y, r, piece) {
     const b = state.board.map(row => row.slice());
-    getCells(piece,r).forEach(([dx,dy]) => { const cx=x+dx, cy=y+dy; if(cy>=0&&cy<b.length&&cx>=0&&cx<settings.boardWidth) b[cy][cx]=piece; });
-    let holes=0, agg=0, bump=0, prev=-1, lines=0;
-    for(let col=0; col<settings.boardWidth; col++){
-      let seen=false, h=0;
-      for(let row=0; row<b.length; row++){
-        if(b[row][col]) { if(!seen) h=b.length-row, seen=true; }
-        else if(seen) holes++;
+    getCells(piece, r).forEach(([dx,dy]) => {
+      const cx = x + dx, cy = y + dy;
+      if (cy >= 0 && cy < b.length && cx >= 0 && cx < settings.boardWidth) b[cy][cx] = piece;
+    });
+    let holes = 0, agg = 0, bump = 0, prev = -1, lines = 0;
+    for (let col = 0; col < settings.boardWidth; col++) {
+      let seen = false, h = 0;
+      for (let row = 0; row < b.length; row++) {
+        if (b[row][col]) { if (!seen) h = b.length - row, seen = true; }
+        else if (seen) holes++;
       }
-      agg += h; if(prev>=0) bump += Math.abs(h-prev); prev=h;
+      agg += h;
+      if (prev >= 0) bump += Math.abs(h - prev);
+      prev = h;
     }
-    b.forEach(row=>{ if(row.every(Boolean)) lines++; });
-    return lines*3 - agg*0.4 - holes*1.1 - bump*0.25;
+    b.forEach(row => { if (row.every(Boolean)) lines++; });
+    return lines * 3 - agg * 0.4 - holes * 1.1 - bump * 0.25;
   }
 
   function drawMini(ctx, type, ox, oy, size=22, alpha=1) {
     if (!type) return;
-    ctx.save(); ctx.globalAlpha = alpha;
+    ctx.save();
+    ctx.globalAlpha = alpha;
     getCells(type,0).forEach(([dx,dy]) => drawCell(ctx, ox + (dx+1.5)*size, oy + (dy+1.5)*size, PIECES[type].c, size-1, type));
     ctx.restore();
   }
 
-  function drawCell(ctx,x,y,color,size,id='') {
+  function drawCell(ctx, x, y, color, size, id='') {
     ctx.fillStyle = color === 'G' ? '#666' : color;
     ctx.shadowColor = color;
     ctx.shadowBlur = settings.shadow / 10;
-    ctx.fillRect(x,y,size,size);
-    if (settings.showOutline) { ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.strokeRect(x+0.5,y+0.5,size-1,size-1); }
+    ctx.fillRect(x, y, size, size);
+    if (settings.showOutline) {
+      ctx.strokeStyle = 'rgba(0,0,0,.5)';
+      ctx.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
+    }
     if (settings.colorBlind && id) {
-      ctx.fillStyle='rgba(255,255,255,.6)'; ctx.font=`${Math.max(8,size/2)}px monospace`; ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText(id[0], x+size/2, y+size/2);
+      ctx.fillStyle = 'rgba(255,255,255,.65)';
+      ctx.font = `${Math.max(8,size/2)}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(id[0], x + size/2, y + size/2);
     }
   }
 
   function render(dt) {
     const cell = boardCanvas.width / settings.boardWidth;
     bctx.clearRect(0,0,boardCanvas.width,boardCanvas.height);
-    bctx.fillStyle = '#000'; bctx.fillRect(0,0,boardCanvas.width,boardCanvas.height);
+    bctx.fillStyle = '#000';
+    bctx.fillRect(0,0,boardCanvas.width,boardCanvas.height);
 
     if (settings.showGrid) {
-      bctx.strokeStyle = getComputedStyle(document.body).getPropertyValue('--grid'); bctx.lineWidth=1;
-      for (let x=0; x<=settings.boardWidth; x++) { bctx.beginPath(); bctx.moveTo(x*cell,0); bctx.lineTo(x*cell,boardCanvas.height); bctx.stroke(); }
-      for (let y=0; y<=settings.boardHeight; y++) { bctx.beginPath(); bctx.moveTo(0,y*cell); bctx.lineTo(boardCanvas.width,y*cell); bctx.stroke(); }
+      bctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid');
+      bctx.lineWidth = 1;
+      for (let x = 0; x <= settings.boardWidth; x++) {
+        bctx.beginPath(); bctx.moveTo(x*cell,0); bctx.lineTo(x*cell,boardCanvas.height); bctx.stroke();
+      }
+      for (let y = 0; y <= settings.boardHeight; y++) {
+        bctx.beginPath(); bctx.moveTo(0,y*cell); bctx.lineTo(boardCanvas.width,y*cell); bctx.stroke();
+      }
     }
 
-    for (let y=settings.hiddenRows; y<state.board.length; y++) {
-      for (let x=0; x<settings.boardWidth; x++) {
+    const clearRows = state.clearAnim ? new Set(state.clearAnim.rows) : null;
+    const clearProgress = state.clearAnim ? Math.min(1, (performance.now() - state.clearAnim.startedAt) / state.clearAnim.duration) : 0;
+
+    for (let y = settings.hiddenRows; y < state.board.length; y++) {
+      for (let x = 0; x < settings.boardWidth; x++) {
         const id = state.board[y][x];
-        if (id) drawCell(bctx, x*cell, (y-settings.hiddenRows)*cell, id==='G' ? '#666' : PIECES[id].c, cell-1, id);
+        if (!id) continue;
+
+        const py = (y - settings.hiddenRows) * cell;
+        const px = x * cell;
+        if (clearRows && clearRows.has(y)) {
+          const glow = 1 + (1 - clearProgress) * 0.8;
+          bctx.save();
+          bctx.globalAlpha = Math.max(0, 1 - clearProgress);
+          bctx.filter = `brightness(${glow})`;
+          drawCell(bctx, px, py, id === 'G' ? '#aaa' : PIECES[id].c, cell - 1, id);
+          bctx.restore();
+        } else {
+          drawCell(bctx, px, py, id === 'G' ? '#666' : PIECES[id].c, cell - 1, id);
+        }
       }
     }
 
     if (!state.over && state.piece) {
-      if (settings.enableGhost) {
+      if (settings.enableGhost && !state.clearAnim) {
         const gy = ghostY();
         getCells().forEach(([dx,dy]) => drawCell(bctx, (state.x+dx)*cell, (gy+dy-settings.hiddenRows)*cell, '#ffffff33', cell-1, ''));
       }
-      if (settings.showBestMove) {
+      if (settings.showBestMove && !state.clearAnim) {
         const best = bestSuggestion();
         if (best) getCells(state.piece,best.r).forEach(([dx,dy]) => drawCell(bctx, (best.x+dx)*cell, (best.y+dy-settings.hiddenRows)*cell, '#00ff8850', cell-1, ''));
       }
@@ -384,6 +519,7 @@
     state.next.slice(0,5).forEach((p,i)=>drawMini(nctx,p,12, i*58 + 8));
 
     ui.score.textContent = state.score;
+    ui.highScore.textContent = state.highScore;
     ui.level.textContent = state.level;
     ui.lines.textContent = state.lines;
     ui.combo.textContent = Math.max(0, state.combo);
@@ -393,74 +529,123 @@
     if (settings.debug) {
       ui.debugPanel.classList.remove('hidden');
       const fps = (1000 / Math.max(16, dt)).toFixed(1);
-      ui.debugPanel.innerHTML = `FPS: ${fps}<br/>Piece: ${state.piece}<br/>Pos: (${state.x},${state.y})<br/>DropAcc: ${state.dropAcc.toFixed(1)}<br/>LockAcc: ${state.lockAcc.toFixed(1)}`;
-    } else ui.debugPanel.classList.add('hidden');
+      ui.debugPanel.innerHTML = `FPS: ${fps}<br/>Piece: ${state.piece}<br/>Pos: (${state.x},${state.y})<br/>DropAcc: ${state.dropAcc.toFixed(1)}<br/>LockAcc: ${state.lockAcc.toFixed(1)}<br/>Clearing: ${!!state.clearAnim}`;
+    } else {
+      ui.debugPanel.classList.add('hidden');
+    }
   }
 
   function fmtTime(ms) {
-    const s = Math.floor(ms/1000), m = Math.floor(s/60), rs = s%60;
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const rs = s % 60;
     return `${String(m).padStart(2,'0')}:${String(rs).padStart(2,'0')}`;
   }
 
   function processInput(dt) {
+    if (state.clearAnim) return;
     const LR = [['left',-1],['right',1]];
     for (const [k,dx] of LR) {
       if (keyState[k]) {
         keyTimers[k] += dt;
         if (keyTimers[k] === dt) { move(dx,0); sfx('move',240); }
         else if (keyTimers[k] > settings.das) {
-          if (settings.arr === 0) { while (move(dx,0)); }
-          else if ((keyTimers[k]-settings.das) >= settings.arr) { move(dx,0); keyTimers[k] = settings.das; }
+          if (settings.arr === 0) {
+            while (move(dx,0));
+          } else if ((keyTimers[k] - settings.das) >= settings.arr) {
+            move(dx,0);
+            keyTimers[k] = settings.das;
+          }
         }
-      } else keyTimers[k] = 0;
+      } else {
+        keyTimers[k] = 0;
+      }
     }
+
     if (keyState.down) {
       keyTimers.down += dt;
       if (keyTimers.down > Math.max(16, gravityMs()/settings.softDropMultiplier)) {
-        move(0,1); state.score += 1; keyTimers.down = 0;
+        if (move(0,1)) {
+          state.score += 1;
+          syncHighScore();
+        }
+        keyTimers.down = 0;
       }
-    } else keyTimers.down = 0;
+    } else {
+      keyTimers.down = 0;
+    }
 
     const now = performance.now();
-    pendingInput = pendingInput.filter(it => now-it.t <= settings.inputBufferMs);
+    pendingInput = pendingInput.filter(it => now - it.t <= settings.inputBufferMs);
     while (pendingInput.length) {
       const act = pendingInput.shift().a;
-      if (act==='cw') rotate(1);
-      else if (act==='ccw') rotate(-1);
-      else if (act==='hold') hold();
-      else if (act==='hard') {
+      if (act === 'cw') rotate(1);
+      else if (act === 'ccw') rotate(-1);
+      else if (act === 'hold') hold();
+      else if (act === 'hard') {
         if (!settings.safeHardDrop || state.hardDropArmed) hardDrop();
-        else { state.hardDropArmed = true; ui.modeBanner.textContent = '再次按 Space 执行硬降'; }
+        else {
+          state.hardDropArmed = true;
+          ui.modeBanner.textContent = '再次按 Space 执行硬降';
+        }
       }
-      else if (act==='pause') togglePause();
     }
   }
 
   function tick(ts) {
-    const dt = Math.min(50, ts - lastTime); lastTime = ts;
+    const dt = Math.min(50, ts - lastTime);
+    lastTime = ts;
+
     if (!state.paused && !state.over) {
-      state.elapsedMs += dt;
-      processInput(dt);
-      processMode(dt);
-      state.dropAcc += dt;
-      if (state.dropAcc >= gravityMs()) {
-        state.dropAcc = 0;
-        if (!move(0,1)) {
-          state.lockAcc += gravityMs();
-          if (state.lockAcc >= settings.lockDelay) lockPiece();
-        } else state.lockAcc = 0;
+      if (state.clearAnim) {
+        if (performance.now() - state.clearAnim.startedAt >= state.clearAnim.duration) finalizeLineClear();
+      } else {
+        state.elapsedMs += dt;
+        processInput(dt);
+        processMode(dt);
+        state.dropAcc += dt;
+        if (state.dropAcc >= gravityMs()) {
+          state.dropAcc = 0;
+          if (!move(0,1)) {
+            state.lockAcc += gravityMs();
+            if (state.lockAcc >= settings.lockDelay) lockPiece();
+          } else {
+            state.lockAcc = 0;
+          }
+        }
       }
       state.stats.apm = ((state.lines / Math.max(1, state.elapsedMs / 60000)) * 10).toFixed(1);
     }
+
     render(dt);
     requestAnimationFrame(tick);
   }
 
+  function togglePause() {
+    if (state.over) return;
+    state.paused = !state.paused;
+    if (state.paused) {
+      ui.overlay.textContent = 'PAUSED';
+      ui.overlay.classList.remove('hidden');
+    } else {
+      ui.overlay.classList.add('hidden');
+      lastTime = performance.now();
+    }
+  }
+
   function bindInputs() {
     window.addEventListener('keydown', (e) => {
-      if (e.repeat && ['z','x',' ','ArrowUp','c','p'].includes(e.key.toLowerCase())) return;
       if (e.key === 'Escape') return toggleSettings();
+      if (e.key === 'p' || e.key === 'P') return togglePause();
       if (ui.settingsModal.open) return;
+
+      if (state.paused) {
+        if (e.key === 'r' || e.key === 'R') restart();
+        return;
+      }
+
+      if (e.repeat && ['z','x',' ','ArrowUp','c'].includes(e.key.toLowerCase())) return;
+
       switch (e.key) {
         case 'ArrowLeft': keyState.left = true; break;
         case 'ArrowRight': keyState.right = true; break;
@@ -469,10 +654,10 @@
         case 'z': case 'Z': pendingInput.push({a:'ccw',t:performance.now()}); break;
         case ' ': pendingInput.push({a:'hard',t:performance.now()}); break;
         case 'c': case 'C': pendingInput.push({a:'hold',t:performance.now()}); break;
-        case 'p': case 'P': pendingInput.push({a:'pause',t:performance.now()}); break;
         case 'r': case 'R': restart(); break;
       }
     });
+
     window.addEventListener('keyup', (e) => {
       if (e.key === 'ArrowLeft') keyState.left = false;
       if (e.key === 'ArrowRight') keyState.right = false;
@@ -482,13 +667,14 @@
     document.querySelectorAll('.mobile-controls button').forEach(btn => {
       const act = btn.dataset.act;
       const down = () => {
-        if (act==='left'||act==='right'||act==='soft') keyState[act==='soft'?'down':act] = true;
-        else if (act==='hard') pendingInput.push({a:'hard',t:performance.now()});
-        else if (act==='cw'||act==='ccw'||act==='hold') pendingInput.push({a:act,t:performance.now()});
-        else if (act==='pause') pendingInput.push({a:'pause',t:performance.now()});
+        if (act === 'pause') return togglePause();
+        if (state.paused || state.clearAnim) return;
+        if (act === 'left' || act === 'right' || act === 'soft') keyState[act === 'soft' ? 'down' : act] = true;
+        else if (act === 'hard') pendingInput.push({a:'hard',t:performance.now()});
+        else if (act === 'cw' || act === 'ccw' || act === 'hold') pendingInput.push({a:act,t:performance.now()});
       };
       const up = () => {
-        if (act==='left'||act==='right'||act==='soft') keyState[act==='soft'?'down':act] = false;
+        if (act === 'left' || act === 'right' || act === 'soft') keyState[act === 'soft' ? 'down' : act] = false;
       };
       btn.addEventListener('touchstart', (e)=>{ e.preventDefault(); down(); }, {passive:false});
       btn.addEventListener('touchend', up);
@@ -498,26 +684,31 @@
     });
   }
 
+  function applyTheme() {
+    document.documentElement.dataset.theme = settings.theme;
+    localStorage.setItem(THEME_KEY, settings.theme === 'neon' ? 'dark' : settings.theme);
+    ui.themeToggleBtn.textContent = settings.theme === 'light' ? '深色模式' : '浅色模式';
+  }
+
+  function toggleTheme() {
+    if (settings.theme === 'neon') settings.theme = 'dark';
+    settings.theme = settings.theme === 'dark' ? 'light' : 'dark';
+    saveSettings();
+    applyTheme();
+  }
+
   function restart() {
     const mode = ui.modeSelect.value;
     state = freshState(mode);
+    keyState = { left:false, right:false, down:false };
+    keyTimers = { left:0, right:0, down:0 };
+    pendingInput = [];
     ui.modeName.textContent = MODES[mode].name;
     ui.modeBanner.textContent = `模式：${MODES[mode].name}`;
     ui.overlay.classList.add('hidden');
     applyTheme();
     spawn();
-  }
-
-  function applyTheme() {
-    document.body.classList.remove('theme-dark','theme-light','theme-neon');
-    document.body.classList.add(`theme-${settings.theme}`);
-  }
-
-  function togglePause() {
-    if (state.over) return;
-    state.paused = !state.paused;
-    ui.overlay.textContent = state.paused ? 'Paused' : '';
-    ui.overlay.classList.toggle('hidden', !state.paused);
+    lastTime = performance.now();
   }
 
   function toggleSettings() {
@@ -533,14 +724,17 @@
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       const ac = sfx.ac || (sfx.ac = new Ctx());
-      const o = ac.createOscillator(), g = ac.createGain();
-      o.type = type==='clear' ? 'triangle' : 'square';
+      const o = ac.createOscillator();
+      const g = ac.createGain();
+      o.type = type === 'clear' ? 'triangle' : 'square';
       o.frequency.value = freq;
       g.gain.value = settings.volume * 0.12;
       o.connect(g).connect(ac.destination);
       o.start();
       o.stop(ac.currentTime + 0.045);
-    } catch {}
+    } catch (err) {
+      // ignore audio limitations
+    }
   }
 
   function fillForm() {
@@ -567,38 +761,59 @@
 
   function bindUI() {
     $('startBtn').onclick = restart;
-    $('pauseBtn').onclick = () => pendingInput.push({a:'pause',t:performance.now()});
+    $('pauseBtn').onclick = togglePause;
     $('settingsBtn').onclick = toggleSettings;
     $('closeSettings').onclick = () => ui.settingsModal.close();
+    ui.themeToggleBtn.onclick = toggleTheme;
+
     $('presetStandard').onclick = () => {
-      settings.boardWidth = 10; settings.boardHeight = 20; settings.hiddenRows = 2;
+      settings.boardWidth = 10;
+      settings.boardHeight = 20;
+      settings.hiddenRows = 2;
       fillForm();
     };
+
     $('exportBtn').onclick = () => {
       const payload = { settings, scores: loadScores() };
       ui.ioText.value = JSON.stringify(payload, null, 2);
     };
+
     $('importBtn').onclick = () => {
       try {
         const data = JSON.parse(ui.ioText.value || '{}');
-        if (data.settings) { settings = sanitize({ ...DEFAULTS, ...data.settings }); saveSettings(); }
+        if (data.settings) {
+          settings = sanitize({ ...DEFAULTS, ...data.settings });
+          saveSettings();
+        }
         if (data.scores) saveScores(data.scores);
-        fillForm(); restart();
-      } catch { alert('JSON 无效'); }
+        fillForm();
+        restart();
+      } catch {
+        alert('JSON 无效');
+      }
     };
+
+    $('clearHighScoreBtn').onclick = clearCurrentModeHighScore;
+
     ui.settingsForm.addEventListener('submit', (e) => {
       e.preventDefault();
       settings = readForm();
       Object.assign(settings, DIFF_PRESET[settings.difficulty] || {});
       saveSettings();
+      applyTheme();
       ui.settingsModal.close();
       restart();
     });
+
     ui.modeSelect.addEventListener('change', restart);
   }
 
   bindInputs();
   bindUI();
+  applyTheme();
   restart();
-  requestAnimationFrame((t)=>{ lastTime=t; requestAnimationFrame(tick); });
+  requestAnimationFrame((t) => {
+    lastTime = t;
+    requestAnimationFrame(tick);
+  });
 })();
