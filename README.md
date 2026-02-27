@@ -19,18 +19,90 @@ python -m http.server 8000
 
 ## 项目结构
 
-- `index.html`：页面结构、侧栏、设置弹窗、移动端按钮
-- `styles.css`：主题、响应式布局、弹窗、触控样式
-- `main.js`：游戏主逻辑（状态管理、渲染、输入、规则、计分、模式、存档、音效）
-- `assets/`：可选资源目录（当前使用 WebAudio 实时生成音效）
+- `index.html`：页面结构、设置弹窗、移动端按钮
+- `styles.css`：主题、响应式布局
+- `main.js`：游戏核心逻辑（状态机、渲染、输入、规则、计分、调试工具）
+- `assets/`：可选资源目录
 
-## 玩法简介
+## 清行修复说明（本次重点）
 
-- 核心规则为经典 Tetris：方块下落、旋转、落地锁定、消行、升级、加速。
-- 支持 7-bag 随机系统（每袋 7 种方块各一次，打乱后抽取）。
-- 支持 Next（显示后续 5 个）、Hold（暂存）、Ghost（落点预览）。
+### 1) 清行算法
+- 采用 **过滤重建（filter + 顶部补空行）**，避免边遍历边 `splice` 的跳行/错位风险。
+- 流程：
+  1. 锁定方块（merge 到 `board[y][x]`）
+  2. 用合并后的 board 检测 `fullRows`
+  3. 进入 `CLEARING` 动画状态
+  4. 动画结束后原子执行 `removeRowsFilterRebuild`
+  5. 结算分数/连击/等级并生成下一块
+- board 坐标统一约定：`board[y][x]`，`y=0` 在顶部，渲染同方向。
 
-## 快捷键（桌面）
+### 2) CLEARING 状态机
+- 状态：`PLAYING | PAUSED | CLEARING | GAMEOVER`
+- `CLEARING` 期间：
+  - 禁止移动/旋转/hold/硬降
+  - 禁止重入 lock/clear
+  - 禁止下落 tick
+- 动画结束后才执行真实删行与下落，杜绝误消/漏消/行错位。
+
+### 3) 隐藏行策略
+- 满行检测从 `hiddenRows` 开始，即只对可见区（及其下方）判定满行。
+- 保持隐藏缓冲行行为稳定，不引入顶部误判。
+
+## 计分与最高分
+
+- 实时显示 `score` 与 `highScore`。
+- 基础消行分：1/2/3/4 行 = `100/300/500/800 * level`
+- 软降每格 +1，硬降每格 +2。
+- 保留 Combo/B2B/T-Spin(简化)/Perfect Clear 奖励。
+- 最高分按模式 localStorage 存储：`tetris_highScore_<mode>`。
+- 设置面板支持“清空当前模式最高分”。
+
+## 可复现调试（Deterministic + Replay）
+
+- 设置面板支持固定随机种子 `debugSeed`（保存到 localStorage）。
+- 使用同一 seed，可稳定复现 bag 顺序。
+- 支持 replay 导出/导入：
+  - 导出内容：`seed + mode + 输入事件序列(相对时间戳)`
+  - 导入后自动按时间重放，复现问题。
+
+## 可观测调试（Debug Overlay）
+
+- 开启“显示调试面板”后可见：
+  - board 维度（可见 + 隐藏行）
+  - 当前 piece 坐标/旋转
+  - dropAcc / lockAcc
+  - 当前 phase（PLAYING/PAUSED/CLEARING/GAMEOVER）
+  - 最近检测到的 fullRows 索引
+  - seed / replay 事件数
+- 提供调试按钮：
+  - **单步执行 Step**（暂停状态下推进 1 帧）
+  - **运行清行自检**
+
+## 控制台调试 API
+
+可在浏览器 Console 直接调用：
+
+- `window.__dumpBoard()`：打印当前棋盘字符矩阵
+- `window.__setBoard(matrix)`：注入指定盘面（二维数组，shape 必须匹配当前 board）
+- `window.runLineClearSelfTests()`：运行清行自检
+
+## 自检说明
+
+`runLineClearSelfTests()` 包含：
+- 同时 2 行相邻满
+- 同时 3 行相邻满
+- 同时 4 行相邻满
+- 同时 2 行不相邻满
+- 隐藏行满（默认策略下按忽略处理）
+
+并断言：
+- cleared 行数正确
+- board 高度不变
+- 方块总量守恒（只减少被清除行上的方块）
+
+失败会 `console.error` 打印 before/after 矩阵用于定位。
+
+## 快捷键
 
 - `← / →`：左右移动
 - `↓`：软降
@@ -42,103 +114,7 @@ python -m http.server 8000
 - `R`：重开
 - `Esc`：打开/关闭设置
 
-## 移动端操作
+## 移动端
 
-页面底部提供触控按钮：
-- 左/右/下（持续按住可连续）
-- 顺时针 / 逆时针旋转
-- 硬降
-- Hold
-- 暂停
-
-已做响应式布局，手机竖屏下可在单屏内操作，按钮不遮挡主棋盘。
-
-## 游戏模式（>=4）
-
-1. **Classic**：经典无限，速度随等级提升。
-2. **Sprint 40**：目标消除 40 行，记录最短用时。
-3. **Survival**：定时注入垃圾行，节奏更快。
-4. **Challenge**：每 30 秒刷新目标连击，失败追加惩罚。
-5. **Zen**：慢速无压模式。
-
-## 计分与最高分
-
-- 游戏内实时显示 `score`（当前分数）和 `highScore`（当前模式最高分）。
-- 基础消行分（可在代码中调节）：
-  - 1 行：100 × level
-  - 2 行：300 × level
-  - 3 行：500 × level
-  - 4 行：800 × level
-- 软降与硬降有额外分（软降每格 +1，硬降每格 +2）。
-- 若启用现代规则，仍保留 Combo、B2B、T-Spin（简化）与 Perfect Clear 奖励。
-- 最高分采用 localStorage 按模式持久化：
-  - `tetris_highScore_classic`
-  - `tetris_highScore_sprint`
-  - `tetris_highScore_survival`
-  - `tetris_highScore_challenge`
-  - `tetris_highScore_zen`
-- 设置面板提供“清空当前模式最高分”按钮。
-
-## 深浅色主题切换
-
-- 顶栏提供“浅色模式 / 深色模式”一键切换按钮。
-- 主题使用 CSS 变量（`:root[data-theme="dark|light|neon"]`）实现。
-- 主题优先级：
-  1. localStorage `tetris_theme`
-  2. 系统 `prefers-color-scheme`
-- 切换后会立即更新并写入 localStorage。
-
-## 参数面板（可保存到 localStorage）
-
-### A) 棋盘与视觉
-- 棋盘宽/高可调（8-16，16-30）
-- 网格线、描边开关
-- 阴影强度
-- 主题切换（dark/light/neon）
-- 色盲友好符号叠加
-
-### B) 速度与手感
-- 初始下落速度（ms）
-- 升级规则（按消行/时间/分数）
-- DAS / ARR
-- 软降倍率
-- 锁定延迟
-- 踢墙模式（off/simple/srs）
-- 输入缓冲时长
-- 旋转重置锁定次数
-
-### C/D/E/F/G)
-- 计分系统（classic / modern）
-- Ghost / Hold / 最佳落点建议 开关
-- 硬降二次确认
-- 难度预设（轻松/标准/硬核）
-- 音量 / 静音 / 视觉反馈
-- Debug 面板开关
-- 导入导出 JSON（设置+记录）
-
-## 暂停与消行动画
-
-- 暂停为稳定 toggle：`P` 或按钮可反复暂停/继续。
-- 暂停期间逻辑冻结（下落、输入停止），但可打开设置和重开。
-- 恢复时重置时间戳，避免“瞬间下落跳帧”。
-- 消行采用短动画（约 180ms）：先标记满行并播放亮度+淡出，再统一删除并结算，期间停止输入与下落以防状态错乱。
-
-## 存档与排行榜（本地）
-
-- localStorage 保存：
-  - 设置：`tetris_vanilla_save_v1`
-  - 成绩：`tetris_vanilla_scores_v1`
-- 各模式保存最佳分数；Sprint 保存最佳时间。
-
-## 调试方式
-
-1. 打开设置，勾选“显示调试面板”。
-2. 右侧显示 FPS、当前方块、坐标、下落/锁定计时。
-3. 浏览器开发者工具 Console 可查看是否有错误。
-
-## 稳定性说明
-
-- 使用 `requestAnimationFrame` 主循环。
-- 输入处理与逻辑更新分离，避免卡键。
-- 所有参数在应用前做范围校验与回退。
-
+底部触控按钮：左右/软降/双旋转/硬降/Hold/暂停。
+响应式布局下按钮不遮挡主棋盘。

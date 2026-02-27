@@ -68,6 +68,11 @@
         </ul>
       </div>
       <div class="card debug hidden" id="debugPanel"></div>
+      <div class="card debug-controls hidden" id="debugControls">
+        <h3>调试控制</h3>
+        <button id="stepBtn" type="button">单步执行 (Step)</button>
+        <button id="runSelfTestsBtn" type="button">运行清行自检</button>
+      </div>
     </aside>
   </main>
 
@@ -136,11 +141,14 @@
       </details>
 
       <details>
-        <summary>导入/导出与记录</summary>
-        <button type="button" id="exportBtn">导出 JSON</button>
-        <button type="button" id="importBtn">导入 JSON</button>
+        <summary>调试复现与导入导出</summary>
+        <label>固定随机种子 seed <input type="number" name="debugSeed" min="1" max="2147483647"></label>
+        <button type="button" id="exportReplayBtn">导出 Replay JSON</button>
+        <button type="button" id="importReplayBtn">导入并重放 Replay</button>
+        <button type="button" id="exportBtn">导出设置/记录 JSON</button>
+        <button type="button" id="importBtn">导入设置/记录 JSON</button>
         <button type="button" id="clearHighScoreBtn">清空当前模式最高分</button>
-        <textarea id="ioText" rows="6" placeholder="粘贴导入/导出 JSON"></textarea>
+        <textarea id="ioText" rows="8" placeholder="粘贴导入/导出 JSON"></textarea>
       </details>
 
       <div class="modal-actions">
