@@ -134,6 +134,20 @@
     return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
   }
 
+  function applyTheme() {
+    const theme = settings.theme === 'light' ? 'light' : (settings.theme === 'neon' ? 'neon' : 'dark');
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem(THEME_KEY, theme === 'neon' ? 'dark' : theme);
+    if (ui.themeToggleBtn) ui.themeToggleBtn.textContent = theme === 'light' ? '深色模式' : '浅色模式';
+  }
+
+  function toggleTheme() {
+    if (settings.theme === 'neon') settings.theme = 'dark';
+    settings.theme = settings.theme === 'dark' ? 'light' : 'dark';
+    saveSettings();
+    applyTheme();
+  }
+
   let settings = loadSettings();
   let state = null;
   let keyState = { left: false, right: false, down: false };
@@ -539,12 +553,17 @@
 
   function render(dt) {
     const cell = boardCanvas.width / settings.boardWidth;
+    const css = getComputedStyle(document.documentElement);
+    const boardBg = css.getPropertyValue('--boardBg') || '#0b0b0b';
+    const grid = css.getPropertyValue('--grid') || 'rgba(255,255,255,.1)';
+    const garbageColor = css.getPropertyValue('--garbage') || '#666';
+
     bctx.clearRect(0, 0, boardCanvas.width, boardCanvas.height);
-    bctx.fillStyle = '#000';
+    bctx.fillStyle = boardBg;
     bctx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
 
     if (settings.showGrid) {
-      bctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid');
+      bctx.strokeStyle = grid;
       for (let x = 0; x <= settings.boardWidth; x++) { bctx.beginPath(); bctx.moveTo(x * cell, 0); bctx.lineTo(x * cell, boardCanvas.height); bctx.stroke(); }
       for (let y = 0; y <= settings.boardHeight; y++) { bctx.beginPath(); bctx.moveTo(0, y * cell); bctx.lineTo(boardCanvas.width, y * cell); bctx.stroke(); }
     }
@@ -560,10 +579,10 @@
           bctx.save();
           bctx.globalAlpha = 1 - clearProgress;
           bctx.filter = `brightness(${1 + (1 - clearProgress) * 1.1})`;
-          drawCell(bctx, x * cell, (y - settings.hiddenRows) * cell, id === 'G' ? '#aaa' : PIECES[id].c, cell - 1, id);
+          drawCell(bctx, x * cell, (y - settings.hiddenRows) * cell, id === 'G' ? garbageColor : PIECES[id].c, cell - 1, id);
           bctx.restore();
         } else {
-          drawCell(bctx, x * cell, (y - settings.hiddenRows) * cell, id === 'G' ? '#666' : PIECES[id].c, cell - 1, id);
+          drawCell(bctx, x * cell, (y - settings.hiddenRows) * cell, id === 'G' ? garbageColor : PIECES[id].c, cell - 1, id);
         }
       }
     }
@@ -940,6 +959,7 @@
         if (act === 'left') { keyState.left = true; recordEvent('leftDown'); }
         else if (act === 'right') { keyState.right = true; recordEvent('rightDown'); }
         else if (act === 'soft') { keyState.down = true; recordEvent('downDown'); }
+        else if (act === 'up') enqueueAction('cw');
         else if (act === 'hard') enqueueAction('hard');
         else if (act === 'cw' || act === 'ccw' || act === 'hold') enqueueAction(act);
       };
@@ -1022,15 +1042,24 @@
     ui.modeSelect.addEventListener('change', () => restart());
   }
 
-  settings.theme = settings.theme === 'neon' ? 'neon' : getThemePreference();
-  bindInputs();
-  bindUI();
-  applyTheme();
-  restart();
-  installDebugApi();
+  function init() {
+    try {
+      settings.theme = settings.theme === 'neon' ? 'neon' : getThemePreference();
+      applyTheme();
+      bindInputs();
+      bindUI();
+      restart();
+      installDebugApi();
+      requestAnimationFrame((t) => {
+        lastTime = t;
+        requestAnimationFrame(tick);
+      });
+    } catch (err) {
+      console.error('[Tetris Init Error]', err);
+      ui.overlay.textContent = 'INIT ERROR';
+      ui.overlay.classList.remove('hidden');
+    }
+  }
 
-  requestAnimationFrame((t) => {
-    lastTime = t;
-    requestAnimationFrame(tick);
-  });
+  init();
 })();

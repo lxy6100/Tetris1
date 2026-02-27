@@ -7,6 +7,8 @@
   --input-bg: #222;
   --input-text: #fff;
   --input-border: #444;
+  --boardBg: #0c0f14;
+  --garbage: #5e6672;
 }
 
 :root[data-theme="light"] {
@@ -18,6 +20,8 @@
   --input-bg: #fff;
   --input-text: #111;
   --input-border: #bbb;
+  --boardBg: #f7f8fb;
+  --garbage: #7f8795;
 }
 
 :root[data-theme="neon"] {
@@ -29,6 +33,8 @@
   --input-bg: #220b34;
   --input-text: #d8fff8;
   --input-border: #4b2d6b;
+  --boardBg: #12081d;
+  --garbage: #6f5f85;
 }
 
 body {
@@ -62,11 +68,22 @@ dialog { border:none; border-radius:10px; width:min(95vw, 760px); background:var
 summary { cursor:pointer; font-weight:600; }
 label { display:block; font-size:14px; }
 .modal-actions { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
-.mobile-controls { display:none; position:sticky; bottom:0; z-index:6; background:var(--panel); padding:8px; grid-template-columns:repeat(8,1fr); gap:6px; }
+.mobile-controls { display:none; position:sticky; bottom:0; z-index:6; background:var(--panel); padding:8px; grid-template-columns:repeat(5,1fr); gap:6px; touch-action:none; }
 .mobile-controls button { margin:0; min-height:44px; font-size:18px; }
 
 @media (max-width: 920px) {
   .layout { grid-template-columns:1fr; }
   .side-panel { grid-template-columns:1fr 1fr; }
   .mobile-controls { display:grid; }
+}
+
+@media (max-width: 768px) {
+  .topbar { position:static; }
+  .layout { padding:8px; gap:8px; }
+  .board-panel { padding:6px; }
+  #board { width:min(96vw, 420px); max-height:62vh; object-fit:contain; }
+  .side-panel { grid-template-columns:1fr; }
+  .card { padding:8px; }
+  .mobile-controls { position:fixed; left:0; right:0; bottom:0; grid-template-columns:repeat(5,1fr); }
+  body { padding-bottom:108px; }
 }
